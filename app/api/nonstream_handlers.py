@@ -1,4 +1,5 @@
 import asyncio
+from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from app.models.schemas import ChatCompletionRequest
 from app.services import GeminiClient
@@ -444,28 +445,17 @@ async def process_request(
                 extra={"request_type": "non-stream", "model": chat_request.model},
             )
 
-        # 如果空响应次数达到限制，跳出循环，并返回酒馆正常响应(包含错误信息)
+        # 如果空响应次数达到限制，跳出循环
         if empty_response_count >= settings.MAX_EMPTY_RESPONSES:
             log(
                 "warning",
                 f"空响应次数达到限制 ({empty_response_count}/{settings.MAX_EMPTY_RESPONSES})，停止轮询",
                 extra={"request_type": "non-stream", "model": chat_request.model},
             )
-
-            if is_gemini:
-                return gemini_from_text(
-                    content="空响应次数达到上限\n请修改输入提示词",
-                    finish_reason="STOP",
-                    stream=False,
-                )
-            else:
-                return openAI_from_text(
-                    model=chat_request.model,
-                    content="空响应次数达到上限\n请修改输入提示词",
-                    finish_reason="stop",
-                    stream=False,
-                    role="error",
-                )
+            raise HTTPException(
+                status_code=500,
+                detail=f"空响应次数达到上限 ({empty_response_count}/{settings.MAX_EMPTY_RESPONSES})，请修改输入提示词",
+            )
 
     # 如果所有尝试都失败
     log(
@@ -473,21 +463,7 @@ async def process_request(
         "API key 替换失败，所有API key都已尝试，请重新配置或稍后重试",
         extra={"request_type": "switch_key"},
     )
-
-    if is_gemini:
-        return gemini_from_text(
-            content="所有API密钥均请求失败\n具体错误请查看轮询日志",
-            finish_reason="STOP",
-            stream=False,
-        )
-    else:
-        return openAI_from_text(
-            model=chat_request.model,
-            content="所有API密钥均请求失败\n具体错误请查看轮询日志",
-            finish_reason="stop",
-            stream=False,
-            role="error",
-        )
+    raise HTTPException(status_code=500, detail="所有API密钥均请求失败，请稍后重试或查看日志")
 
     # raise HTTPException(status_code=500, detail=f"API key 替换失败，所有API key都已尝试，请重新配置或稍后重试")
 
@@ -710,7 +686,7 @@ async def process_nonstream_with_keepalive_stream(
                         },
                     )
 
-                # 如果空响应次数达到限制，跳出循环，并返回酒馆正常响应(包含错误信息)
+                # 如果空响应次数达到限制，跳出循环
                 if empty_response_count >= settings.MAX_EMPTY_RESPONSES:
                     log(
                         "warning",
@@ -720,24 +696,11 @@ async def process_nonstream_with_keepalive_stream(
                             "model": chat_request.model,
                         },
                     )
-
-                    if is_gemini:
-                        error_response = gemini_from_text(
-                            content="空响应次数达到上限\n请修改输入提示词",
-                            finish_reason="STOP",
-                            stream=False,
-                        )
-                    else:
-                        error_response = openAI_from_text(
-                            model=chat_request.model,
-                            content="空响应次数达到上限\n请修改输入提示词",
-                            finish_reason="stop",
-                            stream=False,
-                            role="error",
-                        )
-
-                    yield json.dumps(error_response, ensure_ascii=False)
-                    return
+                    # 直接抛出异常，中断流，客户端会收到协议错误或500
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"空响应次数达到上限 ({empty_response_count}/{settings.MAX_EMPTY_RESPONSES})，请修改输入提示词",
+                    )
 
             # 如果所有尝试都失败
             log(
@@ -745,23 +708,7 @@ async def process_nonstream_with_keepalive_stream(
                 "API key 替换失败，所有API key都已尝试，请重新配置或稍后重试",
                 extra={"request_type": "switch_key"},
             )
-
-            if is_gemini:
-                error_response = gemini_from_text(
-                    content="所有API密钥均请求失败\n具体错误请查看轮询日志",
-                    finish_reason="STOP",
-                    stream=False,
-                )
-            else:
-                error_response = openAI_from_text(
-                    model=chat_request.model,
-                    content="所有API密钥均请求失败\n具体错误请查看轮询日志",
-                    finish_reason="stop",
-                    stream=False,
-                    role="error",
-                )
-
-            yield json.dumps(error_response, ensure_ascii=False)
+            raise HTTPException(status_code=500, detail="所有API密钥均请求失败，请稍后重试或查看日志")
 
         except Exception as e:
             log(
