@@ -1,6 +1,7 @@
 import asyncio
 import json
 from fastapi.responses import StreamingResponse
+from fastapi import HTTPException
 from app.models.schemas import ChatCompletionRequest
 from app.services import GeminiClient
 from app.utils import handle_gemini_error, update_api_call_stats, log, openAI_from_text
@@ -222,22 +223,10 @@ async def stream_response_generator(
                     f"空响应次数达到限制 ({empty_response_count}/{settings.MAX_EMPTY_RESPONSES})，停止轮询",
                     extra={"request_type": "fake-stream", "model": chat_request.model},
                 )
-                if is_gemini:
-                    yield gemini_from_text(
-                        content="空响应次数达到上限\n请修改输入提示词",
-                        finish_reason="STOP",
-                        stream=True,
-                    )
-                else:
-                    yield openAI_from_text(
-                        model=chat_request.model,
-                        content="空响应次数达到上限\n请修改输入提示词",
-                        finish_reason="stop",
-                        stream=True,
-                        role="error",
-                    )
-
-                return
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"空响应次数达到上限 ({empty_response_count}/{settings.MAX_EMPTY_RESPONSES})，请修改输入提示词",
+                )
 
             # 更新任务列表，移除已完成的任务
             tasks = [(k, t) for k, t in tasks if not t.done()]
@@ -396,23 +385,10 @@ async def stream_response_generator(
                     f"空响应次数达到限制 ({empty_response_count}/{settings.MAX_EMPTY_RESPONSES})，停止轮询",
                     extra={"request_type": "stream", "model": chat_request.model},
                 )
-
-                if is_gemini:
-                    yield gemini_from_text(
-                        content="空响应次数达到上限\n请修改输入提示词",
-                        finish_reason="STOP",
-                        stream=True,
-                    )
-                else:
-                    yield openAI_from_text(
-                        model=chat_request.model,
-                        content="空响应次数达到上限\n请修改输入提示词",
-                        finish_reason="stop",
-                        stream=True,
-                        role="error",
-                    )
-
-                return
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"空响应次数达到上限 ({empty_response_count}/{settings.MAX_EMPTY_RESPONSES})，请修改输入提示词",
+                )
 
     # 所有API密钥都尝试失败的处理
     log(
@@ -420,20 +396,7 @@ async def stream_response_generator(
         "所有 API 密钥均请求失败，请稍后重试",
         extra={"key": "ALL", "request_type": "stream", "model": chat_request.model},
     )
-
-    if is_gemini:
-        yield gemini_from_text(
-            content="所有API密钥均请求失败\n具体错误请查看轮询日志",
-            finish_reason="STOP",
-            stream=True,
-        )
-    else:
-        yield openAI_from_text(
-            model=chat_request.model,
-            content="所有API密钥均请求失败\n具体错误请查看轮询日志",
-            finish_reason="stop",
-            role="error",
-        )
+    raise HTTPException(status_code=500, detail="所有API密钥均请求失败，请稍后重试或查看日志")
 
 
 # 处理假流式模式
